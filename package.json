@@ -1,0 +1,14 @@
+{
+  "scripts": {
+    "dev": "npm run perpare && webpack --watch",
+    "build": "npm run perpare && NODE_ENV=production webpack",
+    "perpare": "rm -rf dist && mkdir dist && cp -r manifest.json logo.png _locales index.html dist"
+  },
+  "dependencies": {
+    "json-bigint": "^1.0.0",
+    "@wasm-tool/wasm-pack-plugin": "1.5.0",
+    "webpack": "^5.49.0",
+    "webpack-cli": "^4.7.2",
+    "webpack-dev-server": "^4.15.1"
+  }
+}

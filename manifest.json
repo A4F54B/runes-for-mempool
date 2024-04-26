@@ -1,0 +1,42 @@
+{
+  "name": "__MSG_appName__",
+  "version": "1",
+  "default_locale": "en",
+  "description": "__MSG_appDescription__",
+  "manifest_version": 3,
+  "icons": {
+    "16": "logo.png",
+    "48": "logo.png",
+    "128": "logo.png"
+  },
+  "action": {
+    "default_icon": {
+      "16": "logo.png",
+      "48": "logo.png",
+      "128": "logo.png"
+    },
+    "default_popup": "index.html",
+    "default_title": "Runes For Mempool"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [{
+    "matches": [
+      "https://mempool.space/*",
+      "https://luminex.mempool.space/*"
+    ],
+    "js": ["index.js"],
+    "allFrames": true,
+    "runAt": "document_start"
+  }],
+  "web_accessible_resources": [
+    {
+      "resources": ["index.html", "runes.wasm", "logo.png"],
+      "matches": [
+        "https://mempool.space/*",
+        "https://luminex.mempool.space/*"
+      ]
+    }
+  ]
+}
