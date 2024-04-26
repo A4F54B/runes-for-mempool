@@ -211,48 +211,50 @@ function spacers_rune(rune, spacers) {
   return result;
 }
 
-const fetchTransctionVoutCache = {};
-async function fetchTransctionVout(txid) {
-  if (fetchTransctionVoutCache[txid]) {
-    return fetchTransctionVoutCache[txid];
+const cache = {};
+async function fetchTransctionVout(txid, network) {
+  const url = `${location.protocol}//${location.host}${network === 'testnet' ? '/testnet' : ''}/api/tx/${txid}`;
+  if (cache[url]) {
+    return cache[url];
   }
-  const response = await fetch(`${location.protocol}//${location.host}/api/tx/${txid}`);
+  const response = await fetch(url);
   const json = await response.json();
-  fetchTransctionVoutCache[txid] = json.vout;
+  cache[url] = json.vout;
   return json.vout;
 }
 
 
-async function fetchAddressTransctions(address, after_txid) {
-  const response = await fetch(`${location.protocol}//${location.host}/api/address/${address}/txs${after_txid ? `?after_txid=${after_txid}` : ''}`);
+async function fetchAddressTransctions(address, after_txid, network) {
+  const response = await fetch(`${location.protocol}//${location.host}${network === 'testnet' ? '/testnet' : ''}/api/address/${address}/txs${after_txid ? `?after_txid=${after_txid}` : ''}`);
   const arr = await response.json();
   return arr;
 }
 
 
-const fetchBlockHashCache = {};
-async function fetchBlockHash(height) {
-  if (fetchBlockHashCache[height]) {
-    return fetchBlockHashCache[height];
+
+async function fetchBlockHash(height, network) {
+  const url = `${location.protocol}//${location.host}${network === 'testnet' ? '/testnet' : ''}/api/block-height/${height}`;
+  if (cache[url]) {
+    return cache[url];
   }
-  const response = await fetch(`${location.protocol}//${location.host}/api/block-height/${height}`);
+  const response = await fetch(url);
   const hash = await response.text();
+  cache[url] = hash;
   return hash;
 }
 
 
-const fetchBlockTransctionsVoutCache = {};
-async function fetchBlockTransctionsVout(block, page) {
+async function fetchBlockTransctionsVout(block, page, network) {
   if (block.length < 64) {
-    block = await fetchBlockHash(block);
+    block = await fetchBlockHash(block, network);
   }
-  const key = `${block}:${page}`;
-  if (fetchBlockTransctionsVoutCache[key]) {
-    return fetchBlockTransctionsVoutCache[key];
+  const url = `${location.protocol}//${location.host}${network === 'testnet' ? '/testnet' : ''}/api/block/${block}/txs/${(page - 1) * 25}`;
+  if (cache[url]) {
+    return cache[url];
   }
-  const response = await fetch(`${location.protocol}//${location.host}/api/block/${block}/txs/${(page - 1) * 25}`);
+  const response = await fetch(url);
   const arr = await response.json();
-  fetchBlockTransctionsVoutCache[key] = arr;
+  cache[url] = arr;
   return arr;
 }
 
@@ -314,9 +316,9 @@ async function getArr(vout) {
 }
 
 
-async function run_txid(txid) {
+async function run_txid(txid, network) {
   let currentURL = url;
-  const vout = await fetchTransctionVout(txid);
+  const vout = await fetchTransctionVout(txid, network);
   if (currentURL !== url) {
     return;
   }
@@ -346,13 +348,13 @@ async function getPage() {
   }
 }
 
-async function run_block(block) {
+async function run_block(block, network) {
   let currentURL = url;
   const page = await getPage();
   if (currentURL !== url) {
     return;
   }
-  const list = await fetchBlockTransctionsVout(block, page);
+  const list = await fetchBlockTransctionsVout(block, page, network);
   if (currentURL !== url) {
     return;
   }
@@ -387,9 +389,9 @@ function onReady(cb) {
   });
 }
 
-async function run_address(address) {
+async function run_address(address, network) {
   let currentURL = url;
-  const list = await fetchAddressTransctions(address);
+  const list = await fetchAddressTransctions(address, undefined, network);
   if (currentURL !== url) {
     return;
   }
@@ -409,7 +411,7 @@ async function run_address(address) {
       const tx = document.querySelectorAll('.tx-page-container');
       let last_page;
       while(tx.length > vout.length) {
-        const list = await fetchAddressTransctions(address, after_txid);
+        const list = await fetchAddressTransctions(address, after_txid, network);
         if (currentURL !== url) {
           return;
         }
@@ -464,6 +466,10 @@ async function run_address(address) {
 function routeChange() {  
   const obj = new URL(location.href);
   const pathname = obj.pathname;
+  let network = 'mainnet';
+  if(pathname.startsWith('/testnet')) {
+    network = 'testnet';
+  }
   const txid_match = pathname.match(/\/tx\/([a-fA-F0-9]+)/);
   if (txid_match) {
     const txid = txid_match[1];
@@ -473,10 +479,10 @@ function routeChange() {
         if (currentURL !== url) {
           return;
         }
-        run_txid(txid);
+        run_txid(txid, network);
       });
     } else {
-      run_txid(txid);
+      run_txid(txid, network);
     }
     return;
   }
@@ -486,10 +492,10 @@ function routeChange() {
     const block = block_match[1];
     if (document.readyState === "loading") {
       document.addEventListener("DOMContentLoaded", () => {
-        run_block(block);
+        run_block(block, network);
       });
     } else {
-      run_block(block);
+      run_block(block, network);
     }
   }
 
@@ -498,10 +504,10 @@ function routeChange() {
     const address = address_match[1];
     if (document.readyState === "loading") {
       document.addEventListener("DOMContentLoaded", () => {
-        run_address(address);
+        run_address(address, network);
       });
     } else {
-      run_address(address);
+      run_address(address, network);
     }
   }
 }
