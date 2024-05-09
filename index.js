@@ -1,4 +1,8 @@
 const JSONbig = require('json-bigint')({ useNativeBigInt: true });
+const wasmUrl = chrome.runtime.getURL('runes.wasm');
+const urlObj = new URL(wasmUrl);
+__webpack_public_path__ = urlObj.protocol + '//' + urlObj.host + '/';
+const runes = require('./pkg');
 
 
 function replaceOP_RETURN(dom, json) {
@@ -200,6 +204,25 @@ function replaceOP_RETURN(dom, json) {
   }
 }
 
+function replaceWitness(dom, { list }) {
+  list.forEach(url => {
+    const iframe = document.createElement('iframe');
+    iframe.scrolling = 'no';
+    iframe.loading = 'lazy';
+    iframe.style.cssText = `
+      display: block;
+      width: 300px;
+      height: 300px;
+      border: 0;
+      border-radius: 16px;
+      cursor: pointer;
+      margin-top: 8px;
+    `;
+    iframe.src = `https://ordinals.com${url}`;
+    dom.appendChild(iframe);
+  }); 
+}
+
 function spacers_rune(rune, spacers) {
   let result = '';
   for (let i = 0; i < rune.length; i++) {
@@ -212,15 +235,15 @@ function spacers_rune(rune, spacers) {
 }
 
 const cache = {};
-async function fetchTransctionVout(txid, network) {
+async function fetchTransction(txid, network) {
   const url = `${location.protocol}//${location.host}${network === 'testnet' ? '/testnet' : ''}/api/tx/${txid}`;
   if (cache[url]) {
     return cache[url];
   }
   const response = await fetch(url);
   const json = await response.json();
-  cache[url] = json.vout;
-  return json.vout;
+  cache[url] = json;
+  return json;
 }
 
 
@@ -244,7 +267,7 @@ async function fetchBlockHash(height, network) {
 }
 
 
-async function fetchBlockTransctionsVout(block, page, network) {
+async function fetchBlockTransctions(block, page, network) {
   if (block.length < 64) {
     block = await fetchBlockHash(block, network);
   }
@@ -258,7 +281,7 @@ async function fetchBlockTransctionsVout(block, page, network) {
   return arr;
 }
 
-function check(arr, vout_len, container = document) {
+function replace_runes(arr, vout_len, container = document) {
   const addresses = container.querySelectorAll('.table-tx-vout .address-cell');
   if (addresses.length > 0) {
     if (addresses.length < vout_len) {
@@ -294,40 +317,102 @@ function check(arr, vout_len, container = document) {
   }
 }
 
+function replace_inscriptions(arr, vin_len, container = document) {
+  const addresses = container.querySelectorAll('.table-tx-vin .address-cell');
+  if (addresses.length > 0) {
+    if (addresses.length < vin_len) {
+      const observer_vout = new MutationObserver((mutations, obs) => {
+        const list = container.querySelectorAll('.table-tx-vin .address-cell');
+        if (list.length === vin_len) {
+          arr.forEach(({ index, json }) => {
+            try {
+              replaceWitness(list[index], json);
+            } catch (err) {
+            }
+          });
+          obs.disconnect();
+          return;
+        }
+      });
 
-async function getArr(vout) {
-   const arr = (await Promise.all(vout.map(async (output, index) => {
+      container.querySelectorAll('.table-tx-vin').forEach((table) => {
+        observer_vout.observe(table, {
+          childList: true,
+          subtree: true
+        });
+      })
+    }
+
+    arr.forEach(({ index, json }) => {
+      try {
+        replaceWitness(addresses[index], json);
+      } catch (err) {
+      }
+    });
+    return true;
+  }
+}
+
+async function getRunes(vout) {
+  const arr = (await Promise.all(vout.map(async (output, index) => {
     if (!output || output.scriptpubkey_type !== 'op_return' || !output.scriptpubkey.startsWith('6a5d')) {
       return;
     }
-    const result = await chrome.runtime.sendMessage({
-      method: 'decipher',
-      args: [vout.length, output.scriptpubkey],
-    });
-    if (result === 'error') {
+    const { decipher } = await runes;
+    try {
+      const result = decipher(vout.length, output.scriptpubkey);
+      return {
+        index,
+        json: JSONbig.parse(result),
+      };
+    } catch(err) {
       return;
     }
-    return {
-      index,
-      json: JSONbig.parse(result),
-    };
   }))).filter(item => !!item);
   return arr;
+}
+
+async function getInscriptions(txid, vin) {
+  const input = vin.find(input => input.witness && input.witness.length === 3)
+  if (!input) {
+    return [];
+  }
+  const url = `https://ordinals.com/tx/${txid}`;
+  try {
+    const res = await fetch(url);
+    if (!res.ok) {
+      return [];
+    }
+    const html = await res.text();
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, 'text/html');
+    const list = [...doc.querySelectorAll('.thumbnails iframe')].map(iframe => iframe.getAttribute('src'));
+    return [{
+      index: vin.indexOf(input),
+      json: {
+        list,
+      },
+    }];
+  } catch(err) {
+    return [];
+  }
 }
 
 
 async function run_txid(txid, network) {
   let currentURL = url;
-  const vout = await fetchTransctionVout(txid, network);
+  const { vin, vout } = await fetchTransction(txid, network);
   if (currentURL !== url) {
     return;
   }
-  const arr = await getArr(vout);
+  const [vout_arr, vin_arr] = await Promise.all([getRunes(vout), getInscriptions(txid, vin)]);
+  
   onReady(() => {
     if (currentURL !== url) {
       return;
     }
-    check(arr, vout.length);
+    replace_runes(vout_arr, vout.length);
+    replace_inscriptions(vin_arr, vin.length);
   });
 }
 
@@ -354,7 +439,7 @@ async function run_block(block, network) {
   if (currentURL !== url) {
     return;
   }
-  const list = await fetchBlockTransctionsVout(block, page, network);
+  const list = await fetchBlockTransctions(block, page, network);
   if (currentURL !== url) {
     return;
   }
@@ -364,8 +449,9 @@ async function run_block(block, network) {
     }
     const tx = document.querySelectorAll('.tx-page-container');
     [...tx].forEach(async (dom, index) => {
-      const arr = await getArr(list[index].vout);
-      check(arr, list[index].vout.length, dom.nextSibling.nextSibling);
+      const [vout_arr, vin_arr] = await Promise.all([getRunes(list[index].vout), getInscriptions(list[index].txid, list[index].vin)]);
+      replace_runes(vout_arr, list[index].vout.length, dom.nextSibling.nextSibling);
+      replace_inscriptions(vin_arr, list[index].vin.length, dom.nextSibling.nextSibling);
     });
   });
 }
@@ -391,7 +477,8 @@ function onReady(cb) {
 
 async function run_address(address, network) {
   let currentURL = url;
-  const list = await fetchAddressTransctions(address, undefined, network);
+  const list = [];
+  const arr = await fetchAddressTransctions(address, undefined, network);
   if (currentURL !== url) {
     return;
   }
@@ -400,36 +487,40 @@ async function run_address(address, network) {
     if (currentURL !== url) {
       return;
     }
-    const vout = [];
     let after_txid;
-    list.forEach((item) => {
-      vout.push(item.vout);
-      after_txid = item.txid;
-    });
+    if (arr.length < 50) {
+      last_page = true;
+    }
+    after_txid = arr[arr.length - 1].txid;
+    list.push(...arr);
 
     async function update() {
       const tx = document.querySelectorAll('.tx-page-container');
       let last_page;
-      while(tx.length > vout.length) {
-        const list = await fetchAddressTransctions(address, after_txid, network);
+      while(tx.length > list.length) {
+        const arr = await fetchAddressTransctions(address, after_txid, network);
         if (currentURL !== url) {
           return;
         }
-        list.forEach((item) => {
-          vout.push(item.vout);
-          after_txid = item.txid;
-          if (list.length < 50) {
-            last_page = true;
-          }
-        });
+        if (arr.length === 0) {
+          break;
+        }
+        after_txid = arr[arr.length - 1].txid;
+        list.push(...arr);
+        if (arr.length < 50) {
+          last_page = true;
+          break;
+        }
       }
+      
   
       [...tx].forEach(async (dom, index) => {
-        const arr = await getArr(vout[index]);
-        check(arr, vout[index].length, dom.nextSibling.nextSibling);
+        const [vout_arr, vin_arr] = await Promise.all([getRunes(list[index].vout), getInscriptions(list[index].txid, list[index].vin)]);
+        replace_runes(vout_arr, list[index].vout.length, dom.nextSibling.nextSibling);
+        replace_inscriptions(vin_arr, list[index].vin.length, dom.nextSibling.nextSibling);
       });
   
-      if (last_page && tx.length === vout.length) {
+      if (last_page && tx.length === list.length) {
         return true;
       }
     }

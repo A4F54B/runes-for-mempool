@@ -3,7 +3,6 @@ const WasmPackPlugin = require("@wasm-tool/wasm-pack-plugin");
 
 module.exports = {
   entry: {
-    background: './background.js',
     index: './index.js'
   },
   output: {
@@ -20,6 +19,6 @@ module.exports = {
   devtool: 'cheap-module-source-map',
   mode: process.env.NODE_ENV || 'development',
   experiments: {
-    asyncWebAssembly: true
+    asyncWebAssembly: true,
   }
 };
